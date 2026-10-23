@@ -1,0 +1,318 @@
+<title>隐形矫正追踪原型</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* 布局：手机宽度单栏；顶部切换三种角色，每个角色只看到自己需要的内容 */
+:root {
+  --bg: #f3f5f4;
+  --surface: #ffffff;
+  --fg: #16231f;
+  --muted: #5d6b66;
+  --line: #d9e0dd;
+  --accent: #0f6b5c;
+  --accent-fg: #ffffff;
+  --accent-soft: #dcefe9;
+  --crit: #b3261e;
+  --crit-soft: #fbe3e1;
+  --warn: #8a5a00;
+  --warn-soft: #fcefd0;
+  --ok: #2f6b2f;
+  --ok-soft: #e1f0df;
+  --font: "Noto Sans SC", -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1816; --surface: #17231f; --fg: #e6efec; --muted: #95a8a1; --line: #2a3b36;
+    --accent: #5cc8b3; --accent-fg: #07201b; --accent-soft: #1b3a33;
+    --crit: #ff8f86; --crit-soft: #3d1f1d; --warn: #f0c36a; --warn-soft: #3a2e12;
+    --ok: #8fd18f; --ok-soft: #1d3320; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1816; --surface: #17231f; --fg: #e6efec; --muted: #95a8a1; --line: #2a3b36;
+  --accent: #5cc8b3; --accent-fg: #07201b; --accent-soft: #1b3a33;
+  --crit: #ff8f86; --crit-soft: #3d1f1d; --warn: #f0c36a; --warn-soft: #3a2e12;
+  --ok: #8fd18f; --ok-soft: #1d3320; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg); font-family: var(--font); font-size: 15px; line-height: 1.55;
+  padding-block: 16px 40px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 520px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+h1 { font-size: 19px; margin: 0; line-height: 1.3; }
+h2 { font-size: 16px; margin: 0; }
+p { margin: 0; }
+.muted { color: var(--muted); font-size: 13px; }
+.badge { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 4px; background: var(--warn-soft); color: var(--warn); }
+.roles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+details { font-size: 13px; }
+summary { cursor: pointer; color: var(--accent); font-weight: 500; }
+.log { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.log li { display: grid; grid-template-columns: auto 1fr; gap: 8px; color: var(--muted); }
+.log b { color: var(--fg); font-weight: 500; }
+.metric { display: flex; flex-direction: column; gap: 2px; }
+.metric .num { font-size: 26px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.assume { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
+.assume input { font: inherit; width: 80px; padding: 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
+.brandrow { display: grid; grid-template-columns: 64px 1fr 28px; gap: 8px; align-items: center; font-size: 13px; }
+.roles button { font: inherit; font-weight: 500; padding: 10px 4px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); border-radius: 8px; cursor: pointer; }
+.roles button[aria-selected="true"] { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.intro { background: var(--accent-soft); border-radius: 8px; padding: 10px 12px; font-size: 13px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.row { display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; min-width: 0; }
+.name { font-weight: 700; font-size: 16px; }
+.brand { font-size: 12px; padding: 1px 7px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); }
+.tag { font-size: 13px; padding: 3px 8px; border-radius: 4px; font-weight: 500; }
+.tag.crit { background: var(--crit-soft); color: var(--crit); }
+.tag.warn { background: var(--warn-soft); color: var(--warn); }
+.tag.ok { background: var(--ok-soft); color: var(--ok); }
+.tags { display: flex; gap: 6px; flex-wrap: wrap; }
+.btn { font: inherit; font-weight: 500; padding: 9px 14px; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color: var(--accent-fg); cursor: pointer; min-height: 40px; }
+.btn.ghost { background: transparent; color: var(--accent); }
+.btn.big { width: 100%; min-height: 56px; font-size: 17px; }
+.done { opacity: .55; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { font: inherit; font-size: 13px; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); cursor: pointer; }
+.chip[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.bar { height: 10px; border-radius: 5px; background: var(--line); overflow: hidden; }
+.bar > i { display: block; height: 100%; background: var(--accent); }
+.days { display: flex; gap: 4px; }
+.days span { flex: 1; height: 22px; border-radius: 4px; background: var(--line); }
+.days span.y { background: var(--ok); }
+.days span.n { background: var(--crit); }
+.note { font-size: 13px; color: var(--muted); border-left: 3px solid var(--line); padding-left: 8px; }
+form { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+form label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); min-width: 0; }
+form input, form select { font: inherit; font-size: 15px; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); min-width: 0; width: 100%; }
+form .full { grid-column: 1 / -1; }
+.empty { text-align: center; padding: 20px 8px; color: var(--muted); }
+.ask { border: 1px dashed var(--line); border-radius: 10px; padding: 12px; font-size: 14px; }
+.ask ol { margin: 6px 0 0; padding-left: 20px; }
+.toast { color: var(--ok); font-size: 14px; min-height: 20px; }
+@media (prefers-reduced-motion: no-preference) { .bar > i { transition: width .3s; } }
+</style>
+
+<div class="wrap">
+  <div class="row">
+    <h1>隐形矫正追踪 · 原型</h1>
+    <span class="badge">示例数据，非真实患者</span>
+  </div>
+  <section class="card" aria-label="这是什么">
+    <strong>诊所的隐形矫正患者待办清单，不分牙套品牌。</strong>
+    <p class="muted">助理看今天要联系谁；医生只看需要自己看一眼的人，每一步自动留痕；患者在微信里打卡；院长看每月帮诊所省了多少。可以点，四个标签用同一份数据。</p>
+  </section>
+
+  <div class="roles" role="tablist" aria-label="切换角色">
+    <button role="tab" id="t-assist" aria-selected="true" data-role="assist">助理</button>
+    <button role="tab" id="t-doctor" aria-selected="false" data-role="doctor">医生</button>
+    <button role="tab" id="t-patient" aria-selected="false" data-role="patient">患者</button>
+    <button role="tab" id="t-boss" aria-selected="false" data-role="boss">院长</button>
+  </div>
+
+  <main id="view" class="wrap" style="gap:12px"></main>
+
+  <section class="ask">
+    <strong>看完后，想请您回答 3 个问题</strong>
+    <ol>
+      <li>这个“今日待办”，您或助理每天会打开看吗？</li>
+      <li>哪里多余？哪里缺了什么？</li>
+      <li>给每位新患者建档，多花 1 分钟，能接受吗？</li>
+    </ol>
+  </section>
+</div>
+
+<script>
+// 示例数据。today 是演示用的固定“今天”。
+var BRANDS = ["隐适美", "时代天使", "正雅", "福斯曼", "美立方", "其他"];
+var patients = [
+  { id: 1, name: "张三", brand: "隐适美", tray: 12, total: 28, overdue: 3, due: false, next: "已逾期 3 天", wear: [1,1,1,1,1,1,1], report: "", docNote: "上次：右侧后牙贴合稍差，嘱咐加戴咬胶", seen: false, contacted: false },
+  { id: 2, name: "李四", brand: "时代天使", tray: 11, total: 30, overdue: 0, due: true, next: "11月6日", wear: [1,1,1,1,1,1,1], report: "", docNote: "", seen: false, contacted: false },
+  { id: 3, name: "王五", brand: "正雅", tray: 7, total: 24, overdue: 0, due: false, next: "11月13日", wear: [1,1,0,0,0,0,0], report: "", docNote: "上次：戴得不稳定，已提醒", seen: false, contacted: false },
+  { id: 4, name: "赵六", brand: "福斯曼", tray: 3, total: 20, overdue: 0, due: false, next: "11月20日", wear: [1,1,1,1,1,1,1], report: "", docNote: "", seen: false, contacted: false },
+  { id: 5, name: "陈七", brand: "隐适美", tray: 18, total: 26, overdue: 0, due: false, next: "11月9日", wear: [1,0,1,0,1,0,0], report: "", docNote: "上次：附件脱落过一次，已重新粘结", seen: false, contacted: false },
+  { id: 6, name: "周八", brand: "美立方", tray: 5, total: 22, overdue: 0, due: false, next: "11月27日", wear: [1,1,1,1,1,1,0], report: "", docNote: "", seen: false, contacted: false }
+];
+var PATIENT_ID = 3; // 患者视图里扮演王五
+var role = (location.search.match(/role=(assist|doctor|patient|boss)/) || [0, "assist"])[1];
+var brandFilter = "全部";
+var toast = "";
+var minPer = 3;      // 假设：手工发一条提醒要几分钟
+var revPer = 20000;  // 假设：一位患者一个疗程的收入（元）
+var nowStr = function () { var d = new Date(); return "今天 " + ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2); };
+var events = [
+  { when: "10月22日 17:40", who: "系统", pid: 3, text: "提醒王五：今天还没打卡" },
+  { when: "10月21日 09:12", who: "助理", pid: 1, text: "电话联系张三，患者称出差，已改约" },
+  { when: "10月20日 10:05", who: "系统", pid: 1, text: "提醒张三：复诊日临近" },
+  { when: "10月19日 14:30", who: "医生", pid: 5, text: "查看陈七，嘱咐加戴咬胶" },
+  { when: "10月18日 08:00", who: "系统", pid: 3, text: "提醒王五：今天还没打卡" }
+];
+var SEED = events.length;
+function logEvent(who, pid, text) { events.unshift({ when: nowStr(), who: who, pid: pid, text: text }); }
+
+function rate(p) {
+  var known = p.wear.filter(function (x) { return x !== null; });
+  return known.length ? known.filter(function (x) { return x === 1; }).length / known.length : 1;
+}
+function missed(p) { var n = 0; for (var i = 6; i >= 0 && p.wear[i] === 0; i--) n++; return n; }
+
+function tasks() {
+  var out = [];
+  patients.forEach(function (p) {
+    var t = [];
+    if (p.overdue > 0) t.push({ sev: "crit", text: "逾期 " + p.overdue + " 天未复诊" });
+    if (p.report) t.push({ sev: "crit", text: "患者上报：" + p.report });
+    if (p.due) t.push({ sev: "warn", text: "该换第 " + (p.tray + 1) + " 副" });
+    if (missed(p) >= 3) t.push({ sev: "warn", text: "连续 " + missed(p) + " 天没打卡" });
+    if (t.length) out.push({ p: p, tags: t, score: t.some(function (x) { return x.sev === "crit"; }) ? 0 : 1 });
+  });
+  out.sort(function (a, b) { return (a.p.contacted - b.p.contacted) || (a.score - b.score); });
+  return out;
+}
+
+function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+function tagHtml(t) { return '<span class="tag ' + t.sev + '">' + esc(t.text) + "</span>"; }
+function daysHtml(p) { return '<div class="days" aria-label="最近7天佩戴">' + p.wear.map(function (x) { return '<span class="' + (x === 1 ? "y" : x === 0 ? "n" : "") + '"></span>'; }).join("") + "</div>"; }
+
+function viewAssist() {
+  var list = tasks().filter(function (t) { return brandFilter === "全部" || t.p.brand === brandFilter; });
+  var open = list.filter(function (t) { return !t.p.contacted; }).length;
+  var h = '<p class="intro">助理每天打开这一页：所有品牌的患者放在一张清单里，最紧急的在最上面。联系完点“已联系”。</p>';
+  h += '<div class="row"><h2>今日待办 · 还剩 ' + open + " 位</h2></div>";
+  h += '<div class="chips" role="group" aria-label="按品牌筛选">' + ["全部"].concat(BRANDS.slice(0, 5)).map(function (b) {
+    return '<button class="chip" data-brand="' + b + '" aria-pressed="' + (b === brandFilter) + '">' + b + "</button>";
+  }).join("") + "</div>";
+  if (!list.length) h += '<div class="card empty">这个品牌今天没有需要联系的患者</div>';
+  list.forEach(function (t) {
+    var p = t.p;
+    h += '<div class="card ' + (p.contacted ? "done" : "") + '">' +
+      '<div class="row"><span><span class="name">' + esc(p.name) + '</span> <span class="brand">' + esc(p.brand) + "</span></span>" +
+      '<span class="muted">第 ' + p.tray + " / " + p.total + " 副</span></div>" +
+      '<div class="tags">' + t.tags.map(tagHtml).join("") + "</div>" +
+      '<div class="row"><span class="muted">下次复诊：' + esc(p.next) + "</span>" +
+      '<button class="btn ' + (p.contacted ? "ghost" : "") + '" data-contact="' + p.id + '">' + (p.contacted ? "已联系 ✓" : "已联系") + "</button></div></div>";
+  });
+  h += '<div class="card"><h2>新患者建档</h2><p class="muted">目标：1 分钟填完。品牌随便选，系统不连品牌后台。</p>' +
+    '<form id="newp"><label>姓名<input id="f-name" required placeholder="例如 刘九"></label>' +
+    '<label>牙套品牌<select id="f-brand">' + BRANDS.map(function (b) { return "<option>" + b + "</option>"; }).join("") + "</select></label>" +
+    '<label>总副数<input id="f-total" type="number" min="1" max="80" value="24"></label>' +
+    '<label>几天换一副<input id="f-int" type="number" min="3" max="30" value="14"></label>' +
+    '<label class="full">下次复诊日期<input id="f-next" type="date"></label>' +
+    '<button class="btn full" type="submit">建档</button></form><div class="toast" id="toast" role="status">' + esc(toast) + "</div></div>";
+  return h;
+}
+
+function viewDoctor() {
+  var list = patients.filter(function (p) { return p.overdue > 0 || rate(p) < 0.7 || p.report; });
+  list.sort(function (a, b) { return a.seen - b.seen || rate(a) - rate(b); });
+  var h = '<p class="intro">医生只看需要自己看一眼的人，其他的助理处理。这里不做诊断，也不判断对错。</p>';
+  h += "<h2>需要您看一眼 · " + list.filter(function (p) { return !p.seen; }).length + " 位</h2>";
+  if (!list.length) h += '<div class="card empty">目前没有需要关注的患者</div>';
+  list.forEach(function (p) {
+    var tg = [];
+    if (p.overdue > 0) tg.push({ sev: "crit", text: "逾期 " + p.overdue + " 天" });
+    if (rate(p) < 0.7) tg.push({ sev: "warn", text: "近 7 天自报佩戴 " + Math.round(rate(p) * 7) + "/7 天" });
+    if (p.report) tg.push({ sev: "crit", text: "患者上报：" + p.report });
+    h += '<div class="card ' + (p.seen ? "done" : "") + '"><div class="row"><span><span class="name">' + esc(p.name) + '</span> <span class="brand">' + esc(p.brand) + "</span></span>" +
+      '<span class="muted">第 ' + p.tray + " / " + p.total + " 副</span></div>" +
+      '<div class="tags">' + tg.map(tagHtml).join("") + "</div>" + daysHtml(p) +
+      '<p class="muted">绿=自报戴够，红=没戴够或没打卡。自报会偏乐观，仅作线索。</p>' +
+      (p.docNote ? '<p class="note">' + esc(p.docNote) + "</p>" : "") + logHtml(p) +
+      '<div class="row"><span></span><button class="btn ' + (p.seen ? "ghost" : "") + '" data-seen="' + p.id + '">' + (p.seen ? "已看过 ✓" : "我看过了") + "</button></div></div>";
+  });
+  return h;
+}
+
+function logHtml(p) {
+  var ev = events.filter(function (e) { return e.pid === p.id; });
+  if (!ev.length) return '<details><summary>留痕记录（0 条）</summary><p class="muted">还没有记录</p></details>';
+  return "<details><summary>留痕记录（" + ev.length + " 条）</summary><ul class=\"log\">" + ev.map(function (e) {
+    return "<li><span>" + esc(e.when) + "</span><span><b>" + e.who + "</b> " + esc(e.text) + "</span></li>";
+  }).join("") + "</ul></details>";
+}
+
+function atRisk() { return patients.filter(function (p) { return p.overdue > 0 || missed(p) >= 3 || p.report; }); }
+function savedHours() { var n = 120 + (events.length - SEED); return (n * minPer / 60); }
+
+function viewBoss() {
+  var risk = atRisk(), counts = {};
+  patients.forEach(function (p) { counts[p.brand] = (counts[p.brand] || 0) + 1; });
+  var maxc = Math.max.apply(null, Object.keys(counts).map(function (k) { return counts[k]; }));
+  var h = '<p class="intro">给院长或老板看：这笔钱花得值不值。数字由系统自动记下，不需要谁手工统计。下面标“假设”的两个数，请按本诊所实际改。</p>';
+  h += "<h2>本月小报告</h2>";
+  h += '<div class="card"><div class="grid2">' +
+    '<div class="metric"><span class="num">' + (120 + events.length - SEED) + '</span><span class="muted">系统自动发出的提醒与记录（次）</span></div>' +
+    '<div class="metric"><span class="num">' + (38 + events.filter(function (e) { return e.who === "助理"; }).length - 1) + '</span><span class="muted">助理联系患者（次）</span></div></div></div>';
+  h += '<div class="card"><h2>估算省下的助理时间</h2><div class="assume">假设：手工发一条提醒要 <input id="f-min" type="number" min="1" max="30" value="' + minPer + '"> 分钟</div>' +
+    '<div class="metric"><span class="num"><span id="s-hours">' + savedHours().toFixed(1) + '</span> 小时</span><span class="muted">本月约省下（提醒次数 × 每条分钟数）</span></div></div>';
+  h += '<div class="card"><h2>有中途放弃风险的患者</h2><div class="metric"><span class="num">' + risk.length + ' 位</span><span class="muted">逾期、连续没打卡或上报问题：' + risk.map(function (p) { return esc(p.name); }).join("、") + "</span></div>" +
+    '<div class="assume">假设：一位患者一个疗程收入 <input id="f-rev" type="number" min="1000" step="1000" value="' + revPer + '"> 元</div>' +
+    '<div class="metric"><span class="num"><span id="s-rev">' + (risk.length * revPer).toLocaleString() + '</span> 元</span><span class="muted">涉及疗程收入，需要尽快跟进，别让他们悄悄流失</span></div></div>';
+  h += '<div class="card"><h2>在管患者的牙套品牌</h2>' + Object.keys(counts).map(function (b) {
+    return '<div class="brandrow"><span>' + esc(b) + '</span><div class="bar"><i style="width:' + Math.round(counts[b] / maxc * 100) + '%"></i></div><span>' + counts[b] + "</span></div>";
+  }).join("") + '<p class="muted">多个品牌放在一处管理，不用开多套系统。</p></div>';
+  h += '<div class="card"><h2>留痕</h2><p>本月已自动记录 <strong>' + events.length + '</strong> 条：谁在哪天提醒、联系、查看、打卡。出现“没戴够还是方案问题”的争议时，医生可以翻出来。</p></div>';
+  return h;
+}
+
+function viewPatient() {
+  var p = patients.filter(function (x) { return x.id === PATIENT_ID; })[0];
+  var todayOk = p.wear[6] === 1;
+  var h = '<p class="intro">患者在微信里打开一个链接就能用，不用下载 App。这里扮演患者“王五”。</p>';
+  h += '<div class="card"><div class="row"><span class="name">你好，' + esc(p.name) + '</span><span class="brand">' + esc(p.brand) + "</span></div>" +
+    '<p>现在戴第 <strong>' + p.tray + "</strong> 副，共 " + p.total + " 副</p>" +
+    '<div class="bar" role="progressbar" aria-valuenow="' + p.tray + '" aria-valuemax="' + p.total + '"><i style="width:' + Math.round(p.tray / p.total * 100) + '%"></i></div>' +
+    '<p class="muted">下次复诊：' + esc(p.next) + "</p></div>";
+  h += '<div class="card"><h2>今天牙套戴够了吗？</h2><p class="muted">一天约 20 到 22 小时，吃饭刷牙时才摘下。</p>' +
+    '<button class="btn big ' + (todayOk ? "ghost" : "") + '" data-today="1">' + (todayOk ? "今天已打卡 ✓（再点撤销）" : "今天戴够了") + "</button>" + daysHtml(p) +
+    '<p class="muted">最近 7 天，最右边是今天</p></div>';
+  h += '<div class="card"><h2>遇到问题？点一下通知诊所</h2><div class="chips">' +
+    ["牙套丢了", "附件掉了", "边缘扎嘴", "酸痛得厉害"].map(function (r) { return '<button class="chip" data-report="' + r + '" aria-pressed="' + (p.report === r) + '">' + r + "</button>"; }).join("") +
+    '</div><p class="muted">点了以后，助理的待办里会马上出现这一条。切到“助理”标签看看。</p></div>';
+  return h;
+}
+
+function render() {
+  document.querySelectorAll(".roles button").forEach(function (b) { b.setAttribute("aria-selected", String(b.dataset.role === role)); });
+  document.getElementById("view").innerHTML = role === "assist" ? viewAssist() : role === "doctor" ? viewDoctor() : role === "boss" ? viewBoss() : viewPatient();
+  var f = document.getElementById("newp");
+  if (f) f.addEventListener("submit", addPatient);
+}
+
+function byId(id) { return patients.filter(function (p) { return p.id === +id; })[0]; }
+
+function addPatient(e) {
+  e.preventDefault();
+  var name = document.getElementById("f-name").value.trim();
+  if (!name) return;
+  patients.push({ id: Date.now(), name: name, brand: document.getElementById("f-brand").value, tray: 1, total: +document.getElementById("f-total").value || 24, overdue: 0, due: false, next: document.getElementById("f-next").value || "待定", wear: [null, null, null, null, null, null, null], report: "", docNote: "", seen: false, contacted: false });
+  toast = "已建档：" + name + "。第 3 天起如果没打卡，会出现在待办里。";
+  render();
+}
+
+document.addEventListener("click", function (e) {
+  var t = e.target.closest("button");
+  if (!t) return;
+  if (t.dataset.role) { role = t.dataset.role; toast = ""; }
+  else if (t.dataset.brand) brandFilter = t.dataset.brand;
+  else if (t.dataset.contact) { var p = byId(t.dataset.contact); p.contacted = !p.contacted; if (p.contacted) logEvent("助理", p.id, "已联系" + p.name); }
+  else if (t.dataset.seen) { var q = byId(t.dataset.seen); q.seen = !q.seen; if (q.seen) logEvent("医生", q.id, "查看" + q.name); }
+  else if (t.dataset.today) { var r = byId(PATIENT_ID); r.wear[6] = r.wear[6] === 1 ? 0 : 1; logEvent("患者", r.id, r.wear[6] === 1 ? "打卡：今天戴够了" : "撤销今天的打卡"); }
+  else if (t.dataset.report) { var s = byId(PATIENT_ID); s.report = s.report === t.dataset.report ? "" : t.dataset.report; s.contacted = false; if (s.report) logEvent("患者", s.id, "上报：" + s.report); }
+  else return;
+  render();
+});
+document.addEventListener("input", function (e) {
+  if (e.target.id === "f-min") {
+    minPer = Math.max(1, +e.target.value || 1);
+    document.getElementById("s-hours").textContent = savedHours().toFixed(1);
+  } else if (e.target.id === "f-rev") {
+    revPer = Math.max(0, +e.target.value || 0);
+    document.getElementById("s-rev").textContent = (atRisk().length * revPer).toLocaleString();
+  }
+});
+render();
+</script>
