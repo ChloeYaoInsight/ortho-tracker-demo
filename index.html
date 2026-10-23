@@ -101,6 +101,23 @@ select.field { max-width: 100%; }
 .kv dd { margin: 0; font-weight: 500; }
 .spin { color: var(--accent); font-weight: 500; }
 .rule { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; font-size: 14px; }
+.magic { display: grid; grid-template-columns: 1fr 1.2fr; gap: 10px; }
+.magic .cap { font-size: 12px; color: var(--muted); margin-bottom: 4px; font-weight: 500; }
+.doc { position: relative; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); padding: 8px; overflow: hidden; min-width: 0; }
+.doc .ln { height: 5px; border-radius: 3px; background: var(--line); margin: 6px 0; }
+.doc .tx { font-size: 10px; line-height: 1.5; color: var(--muted); margin: 4px 0; white-space: nowrap; overflow: hidden; text-overflow: clip; }
+.doc .hit-on { background: var(--accent-soft); color: var(--accent); font-weight: 700; border-radius: 3px; padding: 0 2px; }
+.doc .scan { position: absolute; left: 0; right: 0; height: 2px; background: var(--accent); box-shadow: 0 0 12px 3px var(--accent); }
+.cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+.cell { min-height: 32px; border-radius: 4px; background: var(--line); font-size: 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.15; color: transparent; font-variant-numeric: tabular-nums; }
+.cell small { font-size: 7.5px; }
+.cell.on { background: var(--accent); color: var(--accent-fg); }
+.calwrap { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.guard { border-left: 4px solid var(--warn); background: var(--warn-soft); padding: 8px 10px; border-radius: 6px; font-size: 13px; }
+.guard.crit { border-color: var(--crit); background: var(--crit-soft); color: var(--crit); }
+.guard.ok { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.guard p { margin-top: 2px; color: var(--fg); }
+body.only .wrap > .row, body.only .wrap > section, body.only .wrap > .roles { display: none; }
 @media (prefers-reduced-motion: no-preference) { .bar > i { transition: width .3s; } }
 </style>
 
@@ -112,7 +129,7 @@ select.field { max-width: 100%; }
 
   <section class="card" aria-label="这是什么">
     <strong>诊所的隐形矫正患者管家，不分牙套品牌。</strong>
-    <p class="muted">三件微信加表格做不到的事：<b>上传品牌方案，自动建档</b>；<b>患者提问，自动分类并给出回复</b>（规则由医生设）；<b>每一步自动留痕</b>。可以点，四个标签用同一份数据。页面里的“智能识别”是预设的演示效果。</p>
+    <p class="muted">三件微信加表格做不到的事：<b>上传品牌方案，自动建档</b>；<b>患者提问，自动分类并起草回复</b>（规则由医生设，危险症状会被拦截并转交医生）；<b>每一步自动留痕</b>。可以点，四个标签用同一份数据。页面里的“智能识别”是预设的演示效果。</p>
   </section>
 
   <div class="roles" role="tablist" aria-label="切换角色">
@@ -146,7 +163,10 @@ var patients = [
   { id: 6, name: "周八", brand: "美立方", tray: 5, total: 22, overdue: 0, due: false, next: "11月27日", wear: [1,1,1,1,1,1,0], docNote: "", seen: false, contacted: false }
 ];
 var PATIENT_ID = 3; // 患者视图里扮演王五
+var DOCTOR = "李医生";
 var role = (location.search.match(/role=(assist|doctor|patient|boss)/) || [0, "assist"])[1];
+var MAGIC = (location.search.match(/magic=([0-9.]+)/) || [0, null])[1]; // 仅用于导出演示图
+if (MAGIC !== null) document.body.className = "only";
 var brandFilter = "全部";
 var toast = "";
 var minPer = 3;      // 假设：手工发一条提醒要几分钟
@@ -190,9 +210,10 @@ var CATS = {
 var rules = { "附件脱落": "book", "边缘扎嘴": "reply", "酸痛": "reply", "牙套丢失或损坏": "book", "需要医生看（红旗）": "doctor", "其他问题": "doctor" };
 var LOCKED = { "需要医生看（红旗）": 1, "其他问题": 1 };
 var messages = [
-  { id: 1, pid: 5, text: "附件好像掉了一个，吃面包的时候。", cat: "附件脱落", reply: CATS["附件脱落"].reply, status: "new", sent: "" }
+  { id: 1, pid: 5, text: "附件好像掉了一个，吃面包的时候。", cat: "附件脱落", reply: CATS["附件脱落"].reply, status: "new", sent: "" },
+  { id: 2, pid: 6, text: "牙套那里一直出血，右边脸还有点肿。", cat: "需要医生看（红旗）", reply: CATS["需要医生看（红旗）"].reply, status: "doctor", auto: true, sent: "" }
 ];
-var msgId = 2;
+var msgId = 3;
 
 function classify(text) {
   if (CATS["需要医生看（红旗）"].kw.some(function (k) { return text.indexOf(k) >= 0; })) return "需要医生看（红旗）";
@@ -204,6 +225,57 @@ function classify(text) {
 }
 function ruleOf(cat) { return LOCKED[cat] ? "doctor" : rules[cat]; }
 function sevOf(act) { return act === "reply" ? "ok" : act === "book" ? "warn" : "crit"; }
+
+/* ---------- 方案“魔法”：左边原文被扫描，右边长出佩戴日历 ---------- */
+var planRaf = 0;
+function docLines(s) {
+  return [
+    { t: s.brand + " 治疗方案 · 患者 " + s.name, hit: 1 }, { l: 88 }, { l: 60 },
+    { t: "上颌 " + s.total + " 副 / 下颌 " + s.total + " 副", hit: 1 }, { l: 92 }, { l: 75 },
+    { t: "每 " + s.interval + " 天更换一副", hit: 1 }, { l: 85 }, { l: 50 }, { l: 90 },
+    { t: "附件 " + s.attach + " 个　" + (s.ipr === "无" ? "无邻面去釉" : s.ipr), hit: 1 }, { l: 80 }, { l: 66 }, { l: 94 }, { l: 58 }, { l: 84 }
+  ];
+}
+function magicHtml(p, s) {
+  var scan = Math.min(1, p / 0.55), fill = Math.max(0, (p - 0.55) / 0.45), L = docLines(s), N = L.length;
+  var h = '<div class="magic"><div><div class="cap">品牌方案原文（示意）</div><div class="doc">';
+  L.forEach(function (l, i) {
+    if (l.t) h += '<div class="tx"><span class="' + (scan >= (i + 0.5) / N ? "hit-on" : "") + '">' + esc(l.t) + "</span></div>";
+    else h += '<div class="ln" style="width:' + l.l + '%"></div>';
+  });
+  h += '<div class="scan" style="top:' + (scan * 100) + "%;opacity:" + (scan >= 1 ? 0 : 1) + '"></div></div></div>';
+  var shown = Math.round(fill * s.total);
+  h += '<div class="calwrap"><div class="cap">自动生成：患者佩戴日历</div>';
+  h += '<div class="tags" style="min-height:26px;opacity:' + (scan >= 1 ? 1 : 0) + '"><span class="tag info">' + esc(s.brand) + '</span><span class="tag info">共 ' + s.total + ' 副</span><span class="tag info">每 ' + s.interval + ' 天换</span></div><div class="cal">';
+  for (var i = 1; i <= s.total; i++) {
+    var d = addDays(START, (i - 1) * s.interval);
+    h += '<div class="cell' + (i <= shown ? " on" : "") + '">' + i + "<small>" + (d.getMonth() + 1) + "/" + d.getDate() + "</small></div>";
+  }
+  return h + "</div></div></div>";
+}
+function runPlan(s) {
+  var reduce = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches, t0 = null;
+  cancelAnimationFrame(planRaf);
+  plan = { sample: s, status: "reading", p: 0 };
+  render();
+  function step(ts) {
+    if (!plan || plan.sample !== s) return;
+    if (t0 === null) t0 = ts;
+    var p = reduce ? 1 : Math.min(1, (ts - t0) / 3400), el = document.getElementById("magic");
+    plan.p = p;
+    if (el) el.innerHTML = magicHtml(p, s);
+    if (p < 1) planRaf = requestAnimationFrame(step); else { plan.status = "done"; render(); }
+  }
+  planRaf = requestAnimationFrame(step);
+}
+
+/* ---------- 人机协同：拦截提示 ---------- */
+function matched(text, cat) { return CATS[cat].kw.filter(function (k) { return text.indexOf(k) >= 0; }); }
+function guardHtml(m) {
+  if (m.auto) return '<div class="guard crit"><strong>已拦截自动回复，加急转交' + DOCTOR + "</strong><p>检测到" + matched(m.text, m.cat).map(function (k) { return "“" + k + "”"; }).join("、") + "等关键词。系统不起草治疗建议，由医生今天内联系患者。</p></div>";
+  if (m.cat === "其他问题") return '<div class="guard"><strong>系统无法判断，建议转给' + DOCTOR + "</strong><p>没有匹配到已设置的规则，不会自动给出建议。</p></div>";
+  return '<div class="guard ok"><strong>系统只起草，不替你发送</strong><p>点“发送回复”才会发给患者。红旗症状会被自动拦截。</p></div>';
+}
 
 /* ---------- 计算 ---------- */
 function rate(p) {
@@ -242,7 +314,7 @@ function logHtml(p) {
 function msgCardAssist(m) {
   var p = byId(m.pid), act = ruleOf(m.cat);
   var h = '<div class="card"><div class="row"><span><span class="name">' + esc(p.name) + '</span> <span class="brand">' + esc(p.brand) + '</span></span><span class="muted">患者留言</span></div>' +
-    '<p class="bubble">“' + esc(m.text) + '”</p>' +
+    '<p class="bubble">“' + esc(m.text) + '”</p>' + guardHtml(m) +
     '<div class="tags"><span class="tag info">识别为：' + esc(m.cat) + '</span><span class="tag ' + sevOf(act) + '">' + ACTIONS[act] + '</span></div>' +
     '<p class="muted">依据医生设置的规则。可以直接发送，也可以先改一改。</p>' +
     '<textarea class="field" data-reply="' + m.id + '" aria-label="回复内容">' + esc(m.reply) + "</textarea>" +
@@ -256,10 +328,10 @@ function planHtml() {
     '<p class="muted">不用手抄。上传品牌给的方案文件，系统自动读出品牌、总副数、换套间隔，并算好每一副的日期。演示：点下面任一份示例方案。</p>' +
     '<div class="chips">' + SAMPLES.map(function (s, i) { return '<button class="chip" data-sample="' + i + '">' + esc(s.file) + "</button>"; }).join("") + "</div>";
   if (plan && plan.status === "reading") {
-    h += '<div class="sim"><span class="spin">正在读取 ' + esc(plan.sample.file) + ' …</span></div>';
+    h += '<p class="muted spin">正在读取 ' + esc(plan.sample.file) + ' …</p><div id="magic">' + magicHtml(plan.p || 0, plan.sample) + "</div>";
   } else if (plan && plan.status === "done") {
     var s = plan.sample, end = addDays(START, s.total * s.interval);
-    h += '<div class="sim"><strong>识别结果，请核对</strong><dl class="kv">' +
+    h += '<div id="magic">' + magicHtml(1, s) + '</div><div class="sim"><strong>识别结果，请核对</strong><dl class="kv">' +
       "<dt>患者</dt><dd>" + esc(s.name) + "</dd><dt>牙套品牌</dt><dd>" + esc(s.brand) + "</dd>" +
       "<dt>总副数</dt><dd>" + s.total + " 副</dd><dt>换套间隔</dt><dd>每 " + s.interval + " 天换一副</dd>" +
       "<dt>附件</dt><dd>" + s.attach + " 个</dd><dt>邻面去釉</dt><dd>" + esc(s.ipr) + "</dd>" +
@@ -280,6 +352,11 @@ function viewAssist() {
   h += "<h2>患者留言 · " + open.length + " 条待回复</h2>";
   if (!open.length) h += '<div class="card empty">没有待回复的留言。切到“患者”标签发一条试试</div>';
   open.forEach(function (m) { h += msgCardAssist(m); });
+  messages.filter(function (m) { return m.auto && m.status !== "done"; }).forEach(function (m) {
+    var pp = byId(m.pid);
+    h += '<div class="card"><div class="row"><span><span class="name">' + esc(pp.name) + '</span> <span class="brand">' + esc(pp.brand) + '</span></span><span class="tag crit">已拦截 · 已转医生</span></div>' +
+      '<p class="bubble">“' + esc(m.text) + "”</p>" + guardHtml(m) + "</div>";
+  });
   h += '<div class="row"><h2>今日待办 · 还剩 ' + left + " 位</h2></div>";
   h += '<div class="chips" role="group" aria-label="按品牌筛选">' + ["全部"].concat(BRANDS.slice(0, 5)).map(function (b) {
     return '<button class="chip" data-brand="' + b + '" aria-pressed="' + (b === brandFilter) + '">' + b + "</button>";
@@ -307,8 +384,8 @@ function viewDoctor() {
   if (!fwd.length) h += '<div class="card empty">没有待您处理的留言</div>';
   fwd.forEach(function (m) {
     var p = byId(m.pid);
-    h += '<div class="card"><div class="row"><span><span class="name">' + esc(p.name) + '</span> <span class="brand">' + esc(p.brand) + '</span></span><span class="tag crit">' + esc(m.cat) + "</span></div>" +
-      '<p class="bubble">“' + esc(m.text) + '”</p><div class="row"><span></span><button class="btn" data-handled="' + m.id + '">我已处理</button></div></div>';
+    h += '<div class="card"><div class="row"><span><span class="name">' + esc(p.name) + '</span> <span class="brand">' + esc(p.brand) + '</span></span><span class="tag crit">' + (m.auto ? "加急 · " : "") + esc(m.cat) + "</span></div>" +
+      '<p class="bubble">“' + esc(m.text) + "”</p>" + (m.auto ? guardHtml(m) : "") + '<div class="row"><span></span><button class="btn" data-handled="' + m.id + '">我已处理</button></div></div>';
   });
   h += "<h2>需要您看一眼 · " + list.filter(function (p) { return !p.seen; }).length + " 位</h2>";
   if (!list.length) h += '<div class="card empty">目前没有需要关注的患者</div>';
@@ -354,7 +431,7 @@ function viewPatient() {
   if (mine.length) {
     h += "<h2>我的留言</h2>";
     mine.forEach(function (m) {
-      var st = m.status === "sent" ? "" : m.status === "doctor" ? "已转给医生，今天内会联系您。" : m.status === "done" ? "医生已处理。" : "诊所已收到，会尽快回复。";
+      var st = m.status === "sent" ? "" : m.status === "doctor" ? (m.auto ? "已加急转给" + DOCTOR + "，今天内联系您。如出现呼吸或吞咽困难，请立即就近就医。" : "已转给医生，今天内会联系您。") : m.status === "done" ? "医生已处理。" : "诊所已收到，会尽快回复。";
       h += '<div class="card"><p class="bubble me">' + esc(m.text) + "</p>" +
         (m.sent ? '<p class="bubble"><strong>诊所回复：</strong>' + esc(m.sent) + "</p>" : "") +
         (st ? '<p class="muted">' + st + "</p>" : "") + "</div>";
@@ -376,7 +453,7 @@ function viewBoss() {
     '<div class="metric"><span class="num">' + (120 + events.length - SEED) + '</span><span class="muted">系统自动发出的提醒与记录（次）</span></div>' +
     '<div class="metric"><span class="num">' + (38 + events.filter(function (e) { return e.who === "助理"; }).length - 1) + '</span><span class="muted">助理联系患者（次）</span></div></div></div>';
   h += '<div class="card"><h2>患者留言</h2><div class="grid2"><div class="metric"><span class="num">' + sent + '</span><span class="muted">助理按规则直接回复（条）</span></div>' +
-    '<div class="metric"><span class="num">' + toDoc + '</span><span class="muted">转给医生（条）</span></div></div><p class="muted">常见问题不再打断医生，医生只处理真正需要他的。示例数据，含本次演示操作。</p></div>';
+    '<div class="metric"><span class="num">' + toDoc + '</span><span class="muted">转给医生（条）</span></div></div><p class="muted">常见问题不再打断医生，医生只处理真正需要他的。其中 ' + (2 + messages.filter(function (m) { return m.auto; }).length) + ' 条是红旗症状，系统已自动拦截并加急转交医生。示例数据，含本次演示操作。</p></div>';
   h += '<div class="card"><h2>估算省下的助理时间</h2><div class="assume">假设：手工发一条提醒要 <input id="f-min" type="number" min="1" max="30" value="' + minPer + '"> 分钟</div>' +
     '<div class="metric"><span class="num"><span id="s-hours">' + savedHours().toFixed(1) + '</span> 小时</span><span class="muted">本月约省下（提醒次数 × 每条分钟数）</span></div></div>';
   h += '<div class="card"><h2>有中途放弃风险的患者</h2><div class="metric"><span class="num">' + risk.length + ' 位</span><span class="muted">逾期或连续没打卡：' + risk.map(function (p) { return esc(p.name); }).join("、") + "</span></div>" +
@@ -392,6 +469,7 @@ function viewBoss() {
 /* ---------- 渲染与事件 ---------- */
 function render() {
   document.querySelectorAll(".roles button").forEach(function (b) { b.setAttribute("aria-selected", String(b.dataset.role === role)); });
+  if (MAGIC !== null) { document.getElementById("view").innerHTML = '<div class="card"><div id="magic">' + magicHtml(parseFloat(MAGIC), SAMPLES[0]) + "</div></div>"; return; }
   var ae = document.activeElement, keep = ae && ae.id === "f-msg" ? ae.value : null;
   document.getElementById("view").innerHTML = role === "assist" ? viewAssist() : role === "doctor" ? viewDoctor() : role === "boss" ? viewBoss() : viewPatient();
   if (keep !== null && document.getElementById("f-msg")) document.getElementById("f-msg").value = keep;
@@ -411,18 +489,15 @@ document.addEventListener("click", function (e) {
     var txt = (document.getElementById("f-msg").value || "").trim();
     if (!txt) return;
     var cat = classify(txt);
-    messages.unshift({ id: msgId++, pid: PATIENT_ID, text: txt, cat: cat, reply: CATS[cat].reply, status: "new", sent: "" });
+    var flag = cat === "需要医生看（红旗）";
+    messages.unshift({ id: msgId++, pid: PATIENT_ID, text: txt, cat: cat, reply: CATS[cat].reply, status: flag ? "doctor" : "new", auto: flag, sent: "" });
     logEvent("患者", PATIENT_ID, "留言（识别为" + cat + "）");
+    if (flag) logEvent("系统", PATIENT_ID, "检测到红旗症状关键词，已拦截自动回复，加急转交" + DOCTOR);
   }
   else if (d.send) { var m = msgById(d.send); m.status = "sent"; m.sent = m.reply; logEvent("助理", m.pid, "回复患者（" + m.cat + "）"); }
   else if (d.forward) { var m2 = msgById(d.forward); m2.status = "doctor"; logEvent("助理", m2.pid, "转给医生（" + m2.cat + "）"); }
   else if (d.handled) { var m3 = msgById(d.handled); m3.status = "done"; logEvent("医生", m3.pid, "已处理留言（" + m3.cat + "）"); }
-  else if (d.sample) {
-    var s = SAMPLES[+d.sample];
-    plan = { sample: s, status: "reading" };
-    clearTimeout(planTimer);
-    planTimer = setTimeout(function () { if (plan && plan.sample === s) { plan.status = "done"; render(); } }, 1200);
-  }
+  else if (d.sample) { runPlan(SAMPLES[+d.sample]); return; }
   else if (d.confirm) {
     var s2 = plan.sample;
     var np = { id: Date.now(), name: s2.name, brand: s2.brand, tray: 1, total: s2.total, overdue: 0, due: false, next: fmt(addDays(START, 42)), wear: [null, null, null, null, null, null, null], docNote: "", seen: false, contacted: false };
