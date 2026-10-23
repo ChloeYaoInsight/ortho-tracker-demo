@@ -117,6 +117,12 @@ select.field { max-width: 100%; }
 .guard.crit { border-color: var(--crit); background: var(--crit-soft); color: var(--crit); }
 .guard.ok { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 .guard p { margin-top: 2px; color: var(--fg); }
+.chat { background: var(--bg); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+.msgb { align-self: flex-start; max-width: 92%; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font-size: 14px; }
+.msgb b { color: var(--accent); }
+.pack { display: flex; flex-direction: column; gap: 8px; }
+.pack .item { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; background: var(--surface); }
+.pack .item p { font-size: 13px; color: var(--muted); }
 body.only .wrap > .row, body.only .wrap > section, body.only .wrap > .roles { display: none; }
 @media (prefers-reduced-motion: no-preference) { .bar > i { transition: width .3s; } }
 </style>
@@ -129,7 +135,7 @@ body.only .wrap > .row, body.only .wrap > section, body.only .wrap > .roles { di
 
   <section class="card" aria-label="这是什么">
     <strong>诊所的隐形矫正患者管家，不分牙套品牌。</strong>
-    <p class="muted">三件微信加表格做不到的事：<b>上传品牌方案，自动建档</b>；<b>患者提问，自动分类并起草回复</b>（规则由医生设，危险症状会被拦截并转交医生）；<b>每一步自动留痕</b>。可以点，四个标签用同一份数据。页面里的“智能识别”是预设的演示效果。</p>
+    <p class="muted">三件微信加表格做不到的事：<b>上传品牌方案，自动建档</b>；<b>患者提问，自动分类并起草回复</b>（规则预设好，医生只需确认；危险症状会被拦截并转交医生）；<b>方案重启或暂停也能处理</b>；<b>每一步自动留痕</b>。可以点，四个标签用同一份数据。页面里的“智能识别”是预设的演示效果。</p>
   </section>
 
   <div class="roles" role="tablist" aria-label="切换角色">
@@ -142,10 +148,11 @@ body.only .wrap > .row, body.only .wrap > section, body.only .wrap > .roles { di
   <main id="view" class="wrap" style="gap:12px"></main>
 
   <section class="ask">
-    <strong>看完后，想请您回答 3 个问题</strong>
+    <strong>看完后，想请您回答 4 个问题</strong>
     <ol>
-      <li>“上传方案自动建档”，能替助理省掉多少事？</li>
+      <li>“上传方案自动建档”加上自动生成的告知书、复诊提醒、发放清单，能替助理省掉多少事？</li>
       <li>患者常见问题由助理按您定的规则直接回复，您放心吗？哪些必须转给您？</li>
+      <li>方案中途重启或暂停的患者多吗？这样处理够用吗？</li>
       <li>哪里多余？哪里缺了什么？</li>
     </ol>
   </section>
@@ -209,6 +216,8 @@ var CATS = {
 };
 var rules = { "附件脱落": "book", "边缘扎嘴": "reply", "酸痛": "reply", "牙套丢失或损坏": "book", "需要医生看（红旗）": "doctor", "其他问题": "doctor" };
 var LOCKED = { "需要医生看（红旗）": 1, "其他问题": 1 };
+var rulesOk = false;   // 医生是否已确认预设规则
+var chgId = 2, chgNote = null;
 var messages = [
   { id: 1, pid: 5, text: "附件好像掉了一个，吃面包的时候。", cat: "附件脱落", reply: CATS["附件脱落"].reply, status: "new", sent: "" },
   { id: 2, pid: 6, text: "牙套那里一直出血，右边脸还有点肿。", cat: "需要医生看（红旗）", reply: CATS["需要医生看（红旗）"].reply, status: "doctor", auto: true, sent: "" }
@@ -286,6 +295,7 @@ function missed(p) { var n = 0; for (var i = 6; i >= 0 && p.wear[i] === 0; i--) 
 function tasks() {
   var out = [];
   patients.forEach(function (p) {
+    if (p.paused) return;
     var t = [];
     if (p.overdue > 0) t.push({ sev: "crit", text: "逾期 " + p.overdue + " 天未复诊" });
     if (p.due) t.push({ sev: "warn", text: "该换第 " + (p.tray + 1) + " 副" });
@@ -295,7 +305,7 @@ function tasks() {
   out.sort(function (a, b) { return (a.p.contacted - b.p.contacted) || (a.score - b.score); });
   return out;
 }
-function atRisk() { return patients.filter(function (p) { return p.overdue > 0 || missed(p) >= 3; }); }
+function atRisk() { return patients.filter(function (p) { return !p.paused && (p.overdue > 0 || missed(p) >= 3); }); }
 function savedHours() { var n = 120 + (events.length - SEED); return (n * minPer / 60); }
 function byId(id) { return patients.filter(function (p) { return p.id === +id; })[0]; }
 function msgById(id) { return messages.filter(function (m) { return m.id === +id; })[0]; }
@@ -316,7 +326,7 @@ function msgCardAssist(m) {
   var h = '<div class="card"><div class="row"><span><span class="name">' + esc(p.name) + '</span> <span class="brand">' + esc(p.brand) + '</span></span><span class="muted">患者留言</span></div>' +
     '<p class="bubble">“' + esc(m.text) + '”</p>' + guardHtml(m) +
     '<div class="tags"><span class="tag info">识别为：' + esc(m.cat) + '</span><span class="tag ' + sevOf(act) + '">' + ACTIONS[act] + '</span></div>' +
-    '<p class="muted">依据医生设置的规则。可以直接发送，也可以先改一改。</p>' +
+    '<p class="muted">' + (rulesOk ? "依据医生已确认的规则。" : "依据预设规则，医生还没确认。") + "可以直接发送，也可以先改一改。</p>" +
     '<textarea class="field" data-reply="' + m.id + '" aria-label="回复内容">' + esc(m.reply) + "</textarea>" +
     '<div class="row"><button class="btn ghost" data-forward="' + m.id + '">转给医生</button>' +
     '<button class="btn" data-send="' + m.id + '">' + (act === "doctor" ? "先回复患者" : "发送回复") + "</button></div></div>";
@@ -339,8 +349,34 @@ function planHtml() {
       "<dt>预计结束</dt><dd>" + fmtY(end) + "</dd><dt>首次复诊</dt><dd>" + fmt(addDays(START, 42)) + "（每 6 周）</dd></dl>" +
       '<div class="row"><span class="muted">识别结果为预设示例</span><button class="btn" data-confirm="1">确认并建档</button></div></div>';
   } else if (plan && plan.status === "saved") {
-    h += '<p class="toast" role="status">' + esc(toast) + "</p>";
+    h += '<p class="toast" role="status">' + esc(toast) + "</p>" + packHtml();
   }
+  return h + "</div>";
+}
+
+var PACKNAMES = ["开局告知书", "首次复诊提醒", "牙套发放清单"];
+function packHtml() {
+  var s = plan.sample, items = [
+    "您好" + s.name + "，欢迎开始" + s.brand + "隐形矫正。每天请戴够 20 到 22 小时，吃饭刷牙时才摘下。每 " + s.interval + " 天换一副新牙套，换套日我们会提醒您。",
+    "已为您预约 " + fmt(addDays(START, 42)) + " 复诊，前一天会再提醒您一次。",
+    "第 1–" + Math.min(6, s.total) + " 副（共 " + s.total + " 副）、附件 " + s.attach + " 个、护蜡 1 盒、牙套盒 1 个。"
+  ];
+  var done = plan.packSent.filter(Boolean).length;
+  var h = '<div class="sim"><strong>建档后，系统已自动生成 3 样东西（已发 ' + done + ' / 3）</strong><p class="muted">上传这一份文件，今天就不用再手写、手发这三样。文字为演示，需医生审定。</p><div class="pack">';
+  items.forEach(function (x, i) {
+    h += '<div class="item"><strong>' + PACKNAMES[i] + "</strong><p>" + esc(x) + '</p><div class="row"><span></span><button class="btn ' + (plan.packSent[i] ? "ghost" : "") + '" data-pack="' + i + '">' + (plan.packSent[i] ? "已发送 ✓" : "一键发送给患者") + "</button></div></div>";
+  });
+  return h + "</div></div>";
+}
+
+function changeHtml() {
+  var p = byId(chgId) || patients[0];
+  var h = '<div class="card"><h2>方案变更：重启或暂停</h2><p class="muted">治疗中途常有重启方案（refinement）或暂停（拔牙、种钉）。系统保留每一版方案，不用手工删改几十条日程。</p>' +
+    '<select class="field" id="f-chg" aria-label="选择患者">' + patients.map(function (x) { return '<option value="' + x.id + '"' + (x.id === p.id ? " selected" : "") + ">" + esc(x.name) + " · " + esc(x.brand) + " · 第 " + x.tray + "/" + x.total + " 副" + (x.paused ? " · 暂停中" : "") + "</option>"; }).join("") + "</select>" +
+    '<div class="chips">' + (p.paused ? '<button class="chip" data-chg="resume">恢复治疗</button>' : '<button class="chip" data-chg="restart">重启方案（Refinement）</button><button class="chip" data-chg="pause">暂停（拔牙、种钉等）</button>') + "</div>";
+  if (chgNote) h += '<div class="guard ok"><strong>' + esc(chgNote.t) + "</strong><p>" + esc(chgNote.d) + "</p></div>";
+  var vs = patients.filter(function (x) { return (x.version || 1) > 1 || x.paused; });
+  if (vs.length) h += '<div class="muted">' + vs.map(function (x) { return esc(x.name) + "：" + (x.paused ? "暂停中；" : "") + "方案 V" + (x.version || 1) + (x.history && x.history.length ? "（" + esc(x.history.join("；")) + "）" : ""); }).join("<br>") + "</div>";
   return h + "</div>";
 }
 
@@ -371,15 +407,15 @@ function viewAssist() {
       '<div class="row"><span class="muted">下次复诊：' + esc(p.next) + "</span>" +
       '<button class="btn ' + (p.contacted ? "ghost" : "") + '" data-contact="' + p.id + '">' + (p.contacted ? "已联系 ✓" : "已联系") + "</button></div></div>";
   });
-  return h + planHtml();
+  return h + changeHtml() + planHtml();
 }
 
 /* ---------- 医生 ---------- */
 function viewDoctor() {
   var fwd = messages.filter(function (m) { return m.status === "doctor"; });
-  var list = patients.filter(function (p) { return p.overdue > 0 || rate(p) < 0.7; });
+  var list = patients.filter(function (p) { return !p.paused && (p.overdue > 0 || rate(p) < 0.7); });
   list.sort(function (a, b) { return a.seen - b.seen || rate(a) - rate(b); });
-  var h = '<p class="intro">医生只看需要自己看一眼的人，其他的助理处理。系统不做诊断，也不判断对错；回复规则由您设定。</p>';
+  var h = '<p class="intro">医生只看需要自己看一眼的人，其他的助理处理。系统不做诊断，也不判断对错；回复规则已按常见做法预设好，您只需确认。</p>';
   h += "<h2>助理转给您的留言 · " + fwd.length + " 条</h2>";
   if (!fwd.length) h += '<div class="card empty">没有待您处理的留言</div>';
   fwd.forEach(function (m) {
@@ -400,7 +436,7 @@ function viewDoctor() {
       (p.docNote ? '<p class="note">' + esc(p.docNote) + "</p>" : "") + logHtml(p) +
       '<div class="row"><span></span><button class="btn ' + (p.seen ? "ghost" : "") + '" data-seen="' + p.id + '">' + (p.seen ? "已看过 ✓" : "我看过了") + "</button></div></div>";
   });
-  h += '<div class="card"><h2>分诊规则（由您设定）</h2><p class="muted">患者留言被识别为哪一类，就按这里的规则处理。红旗症状和识别不了的问题，始终转给您。改一下试试，再回到“助理”标签看变化。</p>';
+  h += '<div class="card"><h2>分诊规则</h2><div class="guard' + (rulesOk ? " ok" : "") + '"><strong>' + (rulesOk ? "规则已确认，已生效" : "已按常见做法预设好，需要您确认后生效") + "</strong><p>您不用从头设置：看一眼，没问题点确认；想改哪条，直接改下拉。红旗症状和识别不了的问题，始终转给您。预设内容仅为演示，正式使用前需由医生审定。</p></div>";
   Object.keys(CATS).forEach(function (c) {
     h += '<div class="rule"><span>' + esc(c) + '</span>';
     if (LOCKED[c]) h += '<span class="tag crit">始终转医生</span></div>';
@@ -408,7 +444,7 @@ function viewDoctor() {
       return '<option value="' + a + '"' + (rules[c] === a ? " selected" : "") + ">" + ACTIONS[a] + "</option>";
     }).join("") + "</select></div>";
   });
-  return h + "</div>";
+  return h + '<div class="row"><span class="muted">' + (rulesOk ? "助理页的回复建议已依据这套规则。" : "确认前，助理页会提示“医生还没确认”。") + '</span><button class="btn ' + (rulesOk ? "ghost" : "") + '" data-rulesok="1">' + (rulesOk ? "已确认 ✓" : "确认规则") + "</button></div></div>";
 }
 
 /* ---------- 患者 ---------- */
@@ -417,11 +453,13 @@ function viewPatient() {
   var p = byId(PATIENT_ID);
   var todayOk = p.wear[6] === 1;
   var mine = messages.filter(function (m) { return m.pid === PATIENT_ID; });
-  var h = '<p class="intro">患者在微信里打开一个链接就能用，不用下载 App。这里扮演患者“王五”。</p>';
+  var h = '<p class="intro">患者怎么用：诊所在企业微信里发来提醒，点链接进入下面这一页，不用下载 App，也不用注册；在这里提问，诊所能看到并按规则回复。入口形态（企业微信、小程序或网页）待与诊所确认。这里扮演患者“王五”。</p>';
+  h += '<div class="card"><span class="muted">' + DOCTOR + '团队 · 企业微信（示意）</span><div class="chat"><div class="msgb">王五您好，今天还没打卡。<b>点这里一键打卡 ▸</b></div></div><p class="muted">下面是点开链接后看到的页面。</p></div>';
   h += '<div class="card"><div class="row"><span class="name">你好，' + esc(p.name) + '</span><span class="brand">' + esc(p.brand) + "</span></div>" +
     "<p>现在戴第 <strong>" + p.tray + "</strong> 副，共 " + p.total + " 副</p>" +
     '<div class="bar" role="progressbar" aria-valuenow="' + p.tray + '" aria-valuemax="' + p.total + '"><i style="width:' + Math.round(p.tray / p.total * 100) + '%"></i></div>' +
-    '<p class="muted">下次复诊：' + esc(p.next) + "</p></div>";
+    '<p class="muted">下次复诊：' + esc(p.next) + "</p>" +
+    (p.paused ? '<p class="guard">方案已暂停，恢复后会通知您。</p>' : "") + ((p.version || 1) > 1 ? '<p class="muted">当前为重启后的第 ' + p.version + " 版方案。</p>" : "") + "</div>";
   h += '<div class="card"><h2>今天牙套戴够了吗？</h2><p class="muted">一天约 20 到 22 小时，吃饭刷牙时才摘下。</p>' +
     '<button class="btn big ' + (todayOk ? "ghost" : "") + '" data-today="1">' + (todayOk ? "今天已打卡 ✓（再点撤销）" : "今天戴够了") + "</button>" + daysHtml(p) +
     '<p class="muted">最近 7 天，最右边是今天</p></div>';
@@ -503,15 +541,36 @@ document.addEventListener("click", function (e) {
     var np = { id: Date.now(), name: s2.name, brand: s2.brand, tray: 1, total: s2.total, overdue: 0, due: false, next: fmt(addDays(START, 42)), wear: [null, null, null, null, null, null, null], docNote: "", seen: false, contacted: false };
     patients.push(np);
     logEvent("助理", np.id, "上传方案自动建档（" + s2.file + "）");
-    plan.status = "saved";
+    plan.status = "saved"; plan.pid = np.id; plan.packSent = [false, false, false];
     toast = "已建档：" + s2.name + "，" + s2.brand + "，共 " + s2.total + " 副。不需要手抄。可在“今日待办”和院长页的品牌分布里看到。";
+  }
+  else if (d.pack) { plan.packSent[+d.pack] = true; logEvent("助理", plan.pid, "发送" + PACKNAMES[+d.pack]); }
+  else if (d.rulesok) { rulesOk = true; logEvent("医生", 0, "确认分诊规则"); }
+  else if (d.chg) {
+    var cp = byId(chgId); cp.history = cp.history || [];
+    if (d.chg === "restart") {
+      var oldTot = cp.total, doneN = cp.tray, v = cp.version || 1;
+      cp.history.push("V" + v + "：已戴第 1–" + doneN + " 副，第 " + (doneN + 1) + "–" + oldTot + " 副已作废");
+      cp.version = v + 1; cp.tray = 1; cp.total = 14; cp.due = false; cp.overdue = 0; cp.next = fmt(addDays(START, 42));
+      chgNote = { t: "已为" + cp.name + "重启方案：V" + cp.version, d: "旧日历后续 " + (oldTot - doneN) + " 副已一键作废，新方案 14 副已接上，复诊日已重排。不用手工删改日程，旧版本保留可查。" };
+      logEvent("助理", cp.id, "重启方案，V" + cp.version + "，旧方案后续 " + (oldTot - doneN) + " 副作废");
+    } else if (d.chg === "pause") {
+      cp.paused = true;
+      chgNote = { t: "已暂停" + cp.name + "的治疗", d: "暂停期间不再提醒换套和打卡，也不会出现在待办和风险名单里。恢复时点“恢复治疗”。" };
+      logEvent("助理", cp.id, "暂停治疗");
+    } else {
+      cp.paused = false;
+      chgNote = { t: "已恢复" + cp.name + "的治疗", d: "提醒和待办已重新生效。" };
+      logEvent("助理", cp.id, "恢复治疗");
+    }
   }
   else return;
   render();
 });
 
 document.addEventListener("change", function (e) {
-  if (e.target.dataset.rule) { rules[e.target.dataset.rule] = e.target.value; }
+  if (e.target.dataset.rule) { rules[e.target.dataset.rule] = e.target.value; rulesOk = false; render(); }
+  else if (e.target.id === "f-chg") { chgId = +e.target.value; chgNote = null; render(); }
 });
 
 document.addEventListener("input", function (e) {
